@@ -8,6 +8,14 @@ def V2U_mat(in_V_mat):
     U_mat[:,:,2]=in_V_mat[:,:,2]/(GAMMA-1)+0.5*U_mat[:,:,1]*in_V_mat[:,:,1]
     return U_mat
 
+def V2U_mat1(in_V_mat):
+    from numpy import zeros
+    U_mat=zeros(in_V_mat.shape)
+    U_mat[0]=in_V_mat[0]
+    U_mat[1]=in_V_mat[0]*in_V_mat[1]
+    U_mat[2]=in_V_mat[2]/(GAMMA-1)+0.5*U_mat[1]*in_V_mat[1]
+    return U_mat
+
 def U2V_mat3(in_U_mat):
     from numpy import zeros
     V_mat=zeros(in_U_mat.shape)

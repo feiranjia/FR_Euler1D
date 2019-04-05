@@ -105,33 +105,78 @@ class Euler1DEq():
         U_diff_averfp_l_mat=self.U_fp_mat[1,:,:]-U_cell_mean_mat
         #  Modify the U_diff by MINMOD
         from Utility import minmod
-        minmod_param_mat=zeros((3,)+U_diff_averfp_r_mat.shape)
-        minmod_param_mat[0,:]=U_diff_averfp_r_mat
-        minmod_param_mat[1,:]=U_cell_mean_diff_r_mat
-        minmod_param_mat[2,:]=U_cell_mean_diff_l_mat
-        U_diff_averfp_r_new_mat=minmod(minmod_param_mat)
-        minmod_param_mat=zeros((3,)+U_diff_averfp_l_mat.shape)
-        minmod_param_mat[0,:]=U_diff_averfp_l_mat
-        minmod_param_mat[1,:]=U_cell_mean_diff_r_mat
-        minmod_param_mat[2,:]=U_cell_mean_diff_l_mat
-        U_diff_averfp_l_new_mat=minmod(minmod_param_mat)
+        from Utility import minmodTVB
+        M=1E3
+        P_order=self.U_sp_mat.shape[0]
+        h=self.mesh.CellSize/(P_order+1)
+        #  h=self.mesh.CellSize
+        minmod_param_mat=zeros((3,U_diff_averfp_r_mat.size))
+        minmod_param_mat[0,:]=U_diff_averfp_r_mat.flatten(order='C')
+        minmod_param_mat[1,:]=U_cell_mean_diff_r_mat.flatten(order='C')
+        minmod_param_mat[2,:]=U_cell_mean_diff_l_mat.flatten(order='C')
+        if(self.limiter_type=="MINMOD"):
+            U_diff_averfp_r_new_mat=minmod(minmod_param_mat)
+        elif(self.limiter_type=="MINMOD_TVB"):
+            U_diff_averfp_r_new_mat=minmodTVB(minmod_param_mat,M,h)
+        else:
+            exit("%s is undefined!"%(self.limiter_type))
+        minmod_param_mat=zeros((3,U_diff_averfp_l_mat.size))
+        minmod_param_mat[0,:]=U_diff_averfp_l_mat.flatten(order='C')
+        minmod_param_mat[1,:]=U_cell_mean_diff_r_mat.flatten(order='C')
+        minmod_param_mat[2,:]=U_cell_mean_diff_l_mat.flatten(order='C')
+        if(self.limiter_type=="MINMOD"):
+            U_diff_averfp_l_new_mat=minmod(minmod_param_mat)
+        elif(self.limiter_type=="MINMOD_TVB"):
+            U_diff_averfp_l_new_mat=minmodTVB(minmod_param_mat,M,h)
+        else:
+            exit("%s is undefined!"%(self.limiter_type))
+        U_diff_averfp_r_new_mat=reshape(U_diff_averfp_r_new_mat,U_diff_averfp_r_mat.shape)
+        U_diff_averfp_l_new_mat=reshape(U_diff_averfp_l_new_mat,U_diff_averfp_l_mat.shape)
         # Find the indexes needing limiting
         U_diff_averfp_eps=1E-8
         idx_r=where(abs(U_diff_averfp_r_mat[:,0]-U_diff_averfp_r_new_mat[:,0])>U_diff_averfp_eps)[0]
         idx_l=where(abs(U_diff_averfp_l_mat[:,0]-U_diff_averfp_l_new_mat[:,0])>U_diff_averfp_eps)[0]
-        # Do limiting
-        # On FP and SP (P=2)
-        if(idx_r.size > 0):
-            self.U_fp_mat[0,idx_r,:]=U_cell_mean_mat[idx_r,:]-U_diff_averfp_r_new_mat[idx_r,:]
-        if(idx_l.size > 0):
-            self.U_fp_mat[1,idx_l,:]=U_cell_mean_mat[idx_l,:]+U_diff_averfp_l_new_mat[idx_l,:]
-        # On SP
         idx_arr=unique(append(idx_l,idx_r))
-        for ic in idx_arr:
-            for isp in range(self.U_sp_mat.shape[0]):
-                #  self.U_sp_mat[isp,ic,:]=(self.x_sp_mat[isp,ic]-self.mesh.FluxPts_Mat[0,ic]) * (self.U_fp_mat[0,ic,:]-self.U_fp_mat[1,ic,:]) / (self.x_sp_mat[0,ic]-self.x_sp_mat[-1,ic]) + self.U_fp_mat[0,ic,:] # Biased will blow up.
-                #  self.U_sp_mat[isp,ic,:]=(self.x_sp_mat[isp,ic]-self.mesh.CellCenter_Vec[ic]) * (self.U_fp_mat[0,ic,:]-self.U_fp_mat[1,ic,:]) / (self.x_sp_mat[0,ic]-self.x_sp_mat[-1,ic]) + U_cell_mean_mat[ic,:] # P1 MINMOD will oscillate
-                self.U_sp_mat[isp,ic,:]=U_cell_mean_mat[ic,:] # P0 MINMOD
+        # Do limiting
+        if(self.limiter_type=="MINMOD" or self.limiter_type=="MINMOD_TVB"):
+            # On FP
+            self.U_fp_mat[0,idx_r,:]=U_cell_mean_mat[idx_r,:]-U_diff_averfp_r_new_mat[idx_r,:]
+            self.U_fp_mat[1,idx_l,:]=U_cell_mean_mat[idx_l,:]+U_diff_averfp_l_new_mat[idx_l,:]
+            # On SP
+            for ic in idx_arr:
+                for isp in range(self.U_sp_mat.shape[0]):
+                    self.U_sp_mat[isp,ic,:]=U_cell_mean_mat[ic,:] # P0 MINMOD
+                    #  self.U_sp_mat[isp,ic,:]=(self.x_sp_mat[isp,ic]-self.mesh.FluxPts_Mat[0,ic]) * (self.U_fp_mat[0,ic,:]-self.U_fp_mat[1,ic,:]) / (self.x_sp_mat[0,ic]-self.x_sp_mat[-1,ic]) + self.U_fp_mat[0,ic,:] # Biased P1 MINMOD will blow up.
+                    #  self.U_sp_mat[isp,ic,:]=(self.x_sp_mat[isp,ic]-self.mesh.CellCenter_Vec[ic]) * (self.U_fp_mat[0,ic,:]-self.U_fp_mat[1,ic,:]) / (self.x_sp_mat[0,ic]-self.x_sp_mat[-1,ic]) + U_cell_mean_mat[ic,:] # Centered P1 MINMOD will oscillate
+        elif(self.limiter_type=="MINMOD_EXT"): # Extrema preserving. NOT WORKING.
+            from numpy import array,amin,amax,maximum,minimum
+            V_min=array([0.125,0.0       ,0.1])
+            V_max=array([1.0  ,0.92745263,1.0])
+            from GasDynamics import V2U_mat1
+            U_min=V2U_mat1(V_min)
+            U_max=V2U_mat1(V_max)
+            for ic in idx_arr:
+                U_cell_min_arr=amin(self.U_sp_mat[:,ic,:],axis=0)
+                U_cell_max_arr=amax(self.U_sp_mat[:,ic,:],axis=0)
+                #  U_fp_min_arr=amin(self.U_fp_mat[:,ic,:],axis=0)
+                #  U_fp_max_arr=amax(self.U_fp_mat[:,ic,:],axis=0)
+                #  U_cell_min_arr=minimum(U_cell_min_arr,U_fp_min_arr)
+                #  U_cell_max_arr=minimum(U_cell_max_arr,U_fp_max_arr)
+                theta_max_arr=abs((U_max-U_cell_mean_mat[ic,:])/(U_cell_max_arr-U_cell_mean_mat[ic,:]))
+                theta_min_arr=abs((U_min-U_cell_mean_mat[ic,:])/(U_cell_min_arr-U_cell_mean_mat[ic,:]))
+                theta_arr=minimum(minimum(theta_max_arr,theta_min_arr),ones(theta_max_arr.shape))
+                # SP
+                for isp in range(self.U_sp_mat.shape[0]):
+                    self.U_sp_mat[isp,ic,:]=U_cell_mean_mat[ic,:]+theta_arr*(self.U_sp_mat[isp,ic,:]-U_cell_mean_mat[ic,:])
+                # FP
+                for ifp in range(2):
+                    self.U_fp_mat[ifp,ic,:]=U_cell_mean_mat[ic,:]+theta_arr*(self.U_fp_mat[ifp,ic,:]-U_cell_mean_mat[ic,:])
+            #  self.updateUAtFp() # Finally U_fp_l and U_fp_r will intercept with each other
+            # MINMOD update for FP is incompatible with the extrama preserving limiter of SP
+            #  self.U_fp_mat[0,idx_r,:]=U_cell_mean_mat[idx_r,:]-U_diff_averfp_r_new_mat[idx_r,:]
+            #  self.U_fp_mat[1,idx_l,:]=U_cell_mean_mat[idx_l,:]+U_diff_averfp_l_new_mat[idx_l,:]
+        else:
+            exit("%s is undefined!"%(self.limiter_type))
 
     #  def limitSol(self):
         #  # Collect the max and min of the mean in the neighbouring cells

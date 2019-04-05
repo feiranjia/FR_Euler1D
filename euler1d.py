@@ -3,7 +3,7 @@ import numpy as np
 n_cell=100
 quadrature_type="GaussLegendre"
 
-p_order=4
+p_order=3
 
 flux_type="ROE"
 entropy_fix=1
@@ -12,7 +12,9 @@ entropy_fix=1
 BC_type="EXTRAPOLATION"
 IC_type=1
 doLimiting=1
-limiter_type="MINMOD"
+#  limiter_type="MINMOD"
+limiter_type="MINMOD_TVB"
+#  limiter_type="MINMOD_EXT"
 
 if(IC_type==1):
     x_l=-1.0
@@ -27,7 +29,7 @@ else:
 n_iter=100000
 end_time=0.2
 
-cfl=0.01
+cfl=0.1
 
 plot_init=0
 plot_iter=1000
@@ -94,9 +96,9 @@ while(time<end_time and i_iter<n_iter):
         U_cell_mean_mat=eq.getWeightedAver_mat(eq.U_sp_mat)
         V_cell_mean_mat=U2V_mat2(U_cell_mean_mat)
         V_fp_mat=U2V_mat3(eq.U_fp_mat)
-        #  plot_cell=np.arange(50-2,50+3,dtype=int)
-        plot_cell=np.arange(100,dtype=int)
-        plot_var=0
+        plot_cell=np.arange(50-2,50+3,dtype=int)
+        #  plot_cell=np.arange(100,dtype=int)
+        plot_var=1
         ax.plot(mesh.GloCoor_Mat[:,plot_cell],eq.U_sp_mat[:,plot_cell,plot_var],'x-',ms=marker_size,lw=line_width)
         ax.plot(mesh.CellCenter_Vec[plot_cell],U_cell_mean_mat[plot_cell,plot_var],'o--',ms=marker_size,lw=line_width)
         ax.plot(mesh.FluxPts_Mat[0,plot_cell],eq.U_fp_mat[0,plot_cell,plot_var],'>',ms=marker_size,lw=line_width)
@@ -104,6 +106,7 @@ while(time<end_time and i_iter<n_iter):
         ax.set_xlabel("X")
         if(plot_var==0):
             ax.set_ylabel(r"$\rho$")
+            ax.set_ylim([-0.05,1.05])
         elif(plot_var==1):
             ax.set_ylabel(r"$\rho U$")
         elif(plot_var==2):
@@ -129,6 +132,7 @@ ax.plot(values['x'], values['u'], '-',color='C2', label=r"Exact $u$")
 ax.plot(values['x'], values['p'], '-',color='C3', label=r"Exact $p$")
 ax.set_xlabel("X")
 #  ax.set_ylabel("U")
+ax.set_ylim([-0.05,1.05])
 ax.legend()
 ax.set_title("it=%d,t=%.3f"%(i_iter,time))
 #  plt.show()
