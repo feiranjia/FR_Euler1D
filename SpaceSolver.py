@@ -7,7 +7,7 @@ class Euler1DEq():
     def __init__(self, in_mesh, in_flux_type, in_entropy_fix, in_BC_type, in_IC_type, in_doLimiting, in_limiter):
         self.mesh = in_mesh
         self.x_sp_mat = in_mesh.GloCoor_Mat
-        #  self.p_order = in_mesh.PolyOrder
+        self.p_order = in_mesh.PolyOrder
         #  self.n_cell = self.mesh.CellNMAX
         self.flux_type = in_flux_type
         self.EntropyFix = in_entropy_fix
@@ -110,7 +110,7 @@ class Euler1DEq():
 
     def limitSol(self):
         # Collect the max and min of the mean in the neighbouring cells
-        from numpy import mean,max,min,zeros,ones,minimum,tile,isclose,logical_and,logical_not,reshape,sum,where,abs,append,unique
+        from numpy import max,min,zeros,tile,reshape,sum,where,abs,append,unique,array
         U_cell_mean_mat=self.getWeightedAver_mat(self.U_sp_mat)
         U_cell_mean_diff_r_mat=zeros(U_cell_mean_mat.shape)
         U_cell_mean_diff_l_mat=zeros(U_cell_mean_mat.shape)
@@ -124,37 +124,43 @@ class Euler1DEq():
         #  value.
         U_diff_averfp_r_mat=U_cell_mean_mat-self.U_fp_mat[0,:,:]
         U_diff_averfp_l_mat=self.U_fp_mat[1,:,:]-U_cell_mean_mat
-        #  Modify the U_diff by MINMOD
-        from Utility import minmod
-        from Utility import minmodTVB
-        P_order=self.U_sp_mat.shape[0]
-        h=self.mesh.CellSize/(P_order+1)
         #  h=self.mesh.CellSize
-        minmod_param_mat=zeros((3,U_diff_averfp_r_mat.size))
-        minmod_param_mat[0,:]=U_diff_averfp_r_mat.flatten(order='C')
-        minmod_param_mat[1,:]=U_cell_mean_diff_r_mat.flatten(order='C')
-        minmod_param_mat[2,:]=U_cell_mean_diff_l_mat.flatten(order='C')
-        if(self.limiter["type"]=="MINMODTVB"):
+        if(self.limiter["type"]=="SMOOTH_GOOCH"):
+            smth_idc_arr = self.getSmoothnessIndicator()
+            U_cell_mean_diff_mat = array((U_cell_mean_diff_l_mat,U_cell_mean_diff_r_mat))
+            U_diff_averfp_mat = array((U_diff_averfp_l_mat,U_diff_averfp_r_mat))
+            phi_mat = self.getGoochLimiter(U_cell_mean_diff_mat,U_diff_averfp_mat,smth_idc_arr)
+            # FP
+            U_cell_mean_mat2 = tile(U_cell_mean_mat,(2,1,1))
+            phi_mat2 = tile(phi_mat,(2,1,1))
+            self.U_fp_mat = U_cell_mean_mat2 + phi_mat2*(self.U_fp_mat - U_cell_mean_mat2)
+            # SP
+            U_cell_mean_mat_sp = tile(U_cell_mean_mat,(self.p_order+1,1,1))
+            phi_mat_sp = tile(phi_mat,(self.p_order+1,1,1))
+            self.U_sp_mat = U_cell_mean_mat_sp + phi_mat_sp*(self.U_sp_mat - U_cell_mean_mat_sp)
+        elif(self.limiter["type"]=="MINMODTVB"):
+            h=self.mesh.CellSize/(self.p_order+1)
+            #  Modify the U_diff by MINMOD
+            from Utility import minmod
+            from Utility import minmodTVB
+            minmod_param_mat=zeros((3,U_diff_averfp_r_mat.size))
+            minmod_param_mat[0,:]=U_diff_averfp_r_mat.flatten(order='C')
+            minmod_param_mat[1,:]=U_cell_mean_diff_r_mat.flatten(order='C')
+            minmod_param_mat[2,:]=U_cell_mean_diff_l_mat.flatten(order='C')
             U_diff_averfp_r_new_mat=minmodTVB(minmod_param_mat,self.limiter["M"],h)
-        else:
-            exit("%s is undefined!"%(self.limiter["type"]))
-        minmod_param_mat=zeros((3,U_diff_averfp_l_mat.size))
-        minmod_param_mat[0,:]=U_diff_averfp_l_mat.flatten(order='C')
-        minmod_param_mat[1,:]=U_cell_mean_diff_r_mat.flatten(order='C')
-        minmod_param_mat[2,:]=U_cell_mean_diff_l_mat.flatten(order='C')
-        if(self.limiter["type"]=="MINMODTVB"):
+            minmod_param_mat=zeros((3,U_diff_averfp_l_mat.size))
+            minmod_param_mat[0,:]=U_diff_averfp_l_mat.flatten(order='C')
+            minmod_param_mat[1,:]=U_cell_mean_diff_r_mat.flatten(order='C')
+            minmod_param_mat[2,:]=U_cell_mean_diff_l_mat.flatten(order='C')
             U_diff_averfp_l_new_mat=minmodTVB(minmod_param_mat,self.limiter["M"],h)
-        else:
-            exit("%s is undefined!"%(self.limiter["type"]))
-        U_diff_averfp_r_new_mat=reshape(U_diff_averfp_r_new_mat,U_diff_averfp_r_mat.shape)
-        U_diff_averfp_l_new_mat=reshape(U_diff_averfp_l_new_mat,U_diff_averfp_l_mat.shape)
-        # Find the indexes needing limiting
-        U_diff_averfp_eps=1E-8
-        idx_r=where(abs(U_diff_averfp_r_mat[:,0]-U_diff_averfp_r_new_mat[:,0])>U_diff_averfp_eps)[0]
-        idx_l=where(abs(U_diff_averfp_l_mat[:,0]-U_diff_averfp_l_new_mat[:,0])>U_diff_averfp_eps)[0]
-        idx_arr=unique(append(idx_l,idx_r))
-        # Do limiting
-        if(self.limiter["type"]=="MINMODTVB"):
+            U_diff_averfp_r_new_mat=reshape(U_diff_averfp_r_new_mat,U_diff_averfp_r_mat.shape)
+            U_diff_averfp_l_new_mat=reshape(U_diff_averfp_l_new_mat,U_diff_averfp_l_mat.shape)
+            # Find the indexes needing limiting
+            U_diff_averfp_eps=1E-8
+            idx_r=where(abs(U_diff_averfp_r_mat[:,0]-U_diff_averfp_r_new_mat[:,0])>U_diff_averfp_eps)[0]
+            idx_l=where(abs(U_diff_averfp_l_mat[:,0]-U_diff_averfp_l_new_mat[:,0])>U_diff_averfp_eps)[0]
+            idx_arr=unique(append(idx_l,idx_r))
+            # Do limiting
             # On FP
             self.U_fp_mat[0,idx_r,:]=U_cell_mean_mat[idx_r,:]-U_diff_averfp_r_new_mat[idx_r,:]
             self.U_fp_mat[1,idx_l,:]=U_cell_mean_mat[idx_l,:]+U_diff_averfp_l_new_mat[idx_l,:]
@@ -194,59 +200,76 @@ class Euler1DEq():
         else:
             exit("%s is undefined!"%(self.limiter["type"]))
 
-    #  def limitSol(self):
-        #  # Collect the max and min of the mean in the neighbouring cells
-        #  from numpy import mean,max,min,zeros,ones,minimum,tile,isclose,logical_and,logical_not,reshape,sum
-        #  U_cell_mean_mat=self.getWeightedAver_mat(self.U_sp_mat)
-        #  U_cell_mean_max_mat=zeros(U_cell_mean_mat.shape)
-        #  U_cell_mean_min_mat=zeros(U_cell_mean_mat.shape)
-        #  for i_cell in range(1,U_cell_mean_mat.shape[0]-1):
-            #  U_cell_mean_max_mat[i_cell,:]=max(U_cell_mean_mat[i_cell-1:i_cell+2,:],axis=0)
-            #  U_cell_mean_min_mat[i_cell,:]=min(U_cell_mean_mat[i_cell-1:i_cell+2,:],axis=0)
-        #  U_cell_mean_max_mat[0,:]=max(U_cell_mean_mat[0:2,:],axis=0)
-        #  U_cell_mean_min_mat[0,:]=min(U_cell_mean_mat[0:2,:],axis=0)
-        #  U_cell_mean_max_mat[-1,:]=max(U_cell_mean_mat[-2:,:],axis=0)
-        #  U_cell_mean_min_mat[-1,:]=min(U_cell_mean_mat[-2:,:],axis=0)
-        #  #  #
-        #  #  dFdx_sp_mat=self.getFluxDerivAtSp()
-        #  #  dFdx_cell_mean_mat=self.getWeightedAver_mat(dFdx_sp_mat)
-        #  # Calculate phi
-        #  Phi_mat=ones(U_cell_mean_mat.shape)
-        #  if(self.limiter_type=="MINMOD"):
-            #  Phi0_max_mat=ones(U_cell_mean_mat.shape)
-            #  Phi1_max_mat=ones(U_cell_mean_mat.shape)
-            #  Phi0_min_mat=ones(U_cell_mean_mat.shape)
-            #  Phi1_min_mat=ones(U_cell_mean_mat.shape)
-            #  #  idx_fp_max_arr=argmax(self.U_fp_mat,axis=0)
-            #  idx0_eq_max_mat=isclose(self.U_fp_mat[0,:,:],U_cell_mean_max_mat,rtol=1E-9)
-            #  idx1_eq_max_mat=isclose(self.U_fp_mat[1,:,:],U_cell_mean_max_mat,rtol=1E-9)
-            #  idx0_max_mat=self.U_fp_mat[0,:,:]>U_cell_mean_max_mat
-            #  idx1_max_mat=self.U_fp_mat[1,:,:]>U_cell_mean_max_mat
-            #  idx0_max_mat=logical_and(idx0_max_mat,logical_not(idx0_eq_max_mat))
-            #  idx1_max_mat=logical_and(idx1_max_mat,logical_not(idx1_eq_max_mat))
-            #  Phi0_max_mat[idx0_max_mat]=(U_cell_mean_max_mat[idx0_max_mat]-U_cell_mean_mat[idx0_max_mat])/(self.U_fp_mat[0,idx0_max_mat]-U_cell_mean_mat[idx0_max_mat])
-            #  Phi1_max_mat[idx1_max_mat]=(U_cell_mean_max_mat[idx1_max_mat]-U_cell_mean_mat[idx1_max_mat])/(self.U_fp_mat[1,idx1_max_mat]-U_cell_mean_mat[idx1_max_mat])
-            #  Phi_max_mat=minimum(Phi0_max_mat,Phi1_max_mat)
-            #  idx0_eq_min_mat=isclose(self.U_fp_mat[0,:,:],U_cell_mean_min_mat,rtol=1E-9)
-            #  idx1_eq_min_mat=isclose(self.U_fp_mat[1,:,:],U_cell_mean_min_mat,rtol=1E-9)
-            #  idx0_min_mat=self.U_fp_mat[0,:,:]<U_cell_mean_min_mat
-            #  idx1_min_mat=self.U_fp_mat[1,:,:]<U_cell_mean_min_mat
-            #  idx0_min_mat=logical_and(idx0_min_mat,logical_not(idx0_eq_min_mat))
-            #  idx1_min_mat=logical_and(idx1_min_mat,logical_not(idx1_eq_min_mat))
-            #  Phi0_min_mat[idx0_min_mat]=(U_cell_mean_min_mat[idx0_min_mat]-U_cell_mean_mat[idx0_min_mat])/(self.U_fp_mat[0,idx0_min_mat]-U_cell_mean_mat[idx0_min_mat])
-            #  Phi1_min_mat[idx1_min_mat]=(U_cell_mean_min_mat[idx1_min_mat]-U_cell_mean_mat[idx1_min_mat])/(self.U_fp_mat[1,idx1_min_mat]-U_cell_mean_mat[idx1_min_mat])
-            #  Phi_min_mat=minimum(Phi0_min_mat,Phi1_min_mat)
-            #  Phi_mat=minimum(Phi_max_mat,Phi_min_mat)
-        #  else:
-            #  from sys import exit
-            #  exit("Not implemented!")
-        #  # Do limiting
-        #  # On SP
-        #  self.U_sp_mat=tile(U_cell_mean_mat,(self.U_sp_mat.shape[0],1,1)) \
-            #  + tile(Phi_mat,(self.U_sp_mat.shape[0],1,1))*(self.U_sp_mat-tile(U_cell_mean_mat,(self.U_sp_mat.shape[0],1,1)))
-        #  # On FP
-        #  self.U_fp_mat=tile(U_cell_mean_mat,(self.U_fp_mat.shape[0],1,1)) \
-            #  + tile(Phi_mat,(self.U_fp_mat.shape[0],1,1))*(self.U_fp_mat-tile(U_cell_mean_mat,(self.U_fp_mat.shape[0],1,1)))
+    def getSmoothnessIndicator(self):
+        from numpy import array,tile,matmul,sum,reshape,log10
+        restrict_mat_dict={ \
+            3: array([[ 0.7349768 , 0.37068122,-0.1445425 , 0.03888448], \
+                         [-0.0923266 , 0.5923266 , 0.5923266 ,-0.0923266 ], \
+                         [ 0.03888448,-0.1445425 , 0.37068122, 0.7349768 ]]), \
+        }
+        prolong_restrict_mat_dict={ \
+            3: array([[ 1.17382422,-0.23592625, 0.06210202], \
+                         [ 0.31577941, 0.80735482,-0.12313423], \
+                         [-0.12313423, 0.80735482, 0.31577941], \
+                         [ 0.06210202,-0.23592625, 1.17382422]]), \
+        }
+        restrict_mat = restrict_mat_dict[self.p_order]
+        prolong_restrict_mat = prolong_restrict_mat_dict[self.p_order]
+        # Integrate the differences between the original solution of the
+        # restricted-prolongated solution.
+        rho_mat = self.U_sp_mat[:,:,0]
+        rho_rest_mat = matmul(restrict_mat, rho_mat)
+        rho_rest_prol_mat = matmul(prolong_restrict_mat, rho_rest_mat)
+        rho_diff2_mat = (rho_mat - rho_rest_prol_mat)**2
+        weights_mat = reshape(self.mesh.Weights_Vec,(self.mesh.Weights_Vec.size,1))
+        weights_mat = tile(weights_mat, (1,rho_diff2_mat.shape[1]))
+        # The ingegration in fact requires the jacobian to be included in the
+        # sum. However, since it is cancelled in the division, it is omitted.
+        rho_diff2_int_arr = sum(weights_mat * rho_diff2_mat, axis=0)
+        rho_int_arr = sum(weights_mat * rho_mat, axis=0)
+        smth_idc_arr = log10(rho_diff2_int_arr / rho_int_arr)
+        return smth_idc_arr
+
+    def getGoochLimiter(self,in_U_cell_mean_diff_mat,in_U_diff_averfp_mat,in_smth_idc_arr):
+        from numpy import amax,amin,tile,ones,sin,pi,logical_and,reshape
+        #  # in_U_cell_mean_diff_mat consists of [U_cell_mean_diff_r_mat, U_cell_mean_diff_l_mat]
+        #  # in_U_diff_averfp_mat consists of [U_diff_averfp_r_mat, U_diff_averfp_l_mat]
+        #  U_cell_mean_diff_max_mat = amax(in_U_cell_mean_diff_mat, axis=0)
+        #  U_cell_mean_diff_min_mat = amin(in_U_cell_mean_diff_mat, axis=0)
+        #  U_cell_mean_diff_max_mat2 = tile(U_cell_mean_diff_max_mat, (2,1,1))
+        #  U_cell_mean_diff_min_mat2 = tile(U_cell_mean_diff_min_mat, (2,1,1))
+        #  eps_zero = 1E-12
+        #  idx_pos_mat = in_U_diff_averfp_mat > eps_zero
+        #  idx_neg_mat = in_U_diff_averfp_mat < -eps_zero
+        #  U_diff_ratio_mat = ones(in_U_diff_averfp_mat.shape) * 1E3
+        #  U_diff_ratio_mat[idx_pos_mat] = U_cell_mean_diff_max_mat2[idx_pos_mat] / in_U_diff_averfp_mat[idx_pos_mat]
+        #  U_diff_ratio_mat[idx_neg_mat] = U_cell_mean_diff_min_mat2[idx_neg_mat] / in_U_diff_averfp_mat[idx_neg_mat]
+        #  idx_mat = U_diff_ratio_mat < 1.5
+        #  phi_mat = ones(U_diff_ratio_mat.shape)
+        #  phi_mat[idx_mat] = -4.0/27.0 * U_diff_ratio_mat[idx_mat]**3 + U_diff_ratio_mat[idx_mat]
+        #  phi_mat = amin(phi_mat, axis=0)
+        # sigma
+        sigma_arr = ones(in_smth_idc_arr.shape)
+        idx_arr = logical_and(in_smth_idc_arr >= self.limiter["mid"]-self.limiter["wid"], in_smth_idc_arr <= self.limiter["mid"]+self.limiter["wid"])
+        # Transition function affects the overshoots.
+        #  sigma_mag = 0.5*0.975
+        #  sigma_freq = 0.5*pi # scale=4 fails. scale=1 should be correct.
+        #  sigma_arr[idx_arr] = sigma_mag*(1-sin(sigma_freq*(in_smth_idc_arr[idx_arr]-self.limiter["mid"])/self.limiter["wid"]))
+        from numpy import tanh
+        sigma_arr[idx_arr]=0.5*(-tanh((in_smth_idc_arr[idx_arr]-self.limiter["mid"])*self.limiter["wid"])+1)
+        idx_arr = in_smth_idc_arr > self.limiter["mid"]+self.limiter["wid"]
+        sigma_arr[idx_arr] = 0.0
+        sigma_arr3 = tile(reshape(sigma_arr,(sigma_arr.size,1)),(1,3))
+        #  # Consider only the 2nd order. Not working. Phi from Michalak_JoCP2009
+        #  # is not working in high order DG.
+        #  # For the explanations of the 2nd order and the higher order, refer
+        #  # to Michalak_JoCP2009.
+        #  phi_mat = sigma_arr3 + (1.0 - sigma_arr3)*phi_mat
+        #  # Treat the 2nd order and the higher order as the same.
+        #  phi_mat = sigma_arr3 + (1.0 - sigma_arr3)*phi_mat/2.0 
+        # Consider only the higher order
+        phi_mat = sigma_arr3
+        return phi_mat
 
     def getRes(self):
         from numpy import reshape,matmul,zeros

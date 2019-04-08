@@ -1,20 +1,36 @@
 import numpy as np
 
-n_cell=180
 quadrature_type="GaussLegendre"
+
+IC_type=1 # SOD
+#  IC_type=2 # Shu-Osher
+
+if(IC_type==1):
+    n_cell=100 # IC=1
+elif(IC_type==2):
+    n_cell=180 # IC=2
 
 p_order=3
 
 flux_type="ROE"
 entropy_fix=1
 #  flux_type="AUSMPlus"
+
 #  BC_type="PERIODIC"
 BC_type="EXTRAPOLATION"
-#  IC_type=1 # SOD
-IC_type=2 # Shu-Osher
+
 doLimiting=1
 # M=0 is MINMOD
-limiter={"type":"MINMODTVB","M":3000}
+#  limiter={"type":"MINMODTVB","M":1000}
+limiter={"type":"SMOOTH_GOOCH","mid":-2.6,"wid":2}
+
+TimeScheme="RK3"
+cfl=0.3
+
+plot_init=0
+plot_iter=1000
+monitor_iter=100
+##########################################
 
 if(IC_type==1):
     x_l=-1.0
@@ -26,13 +42,12 @@ else:
     exit("Not implemented!")
 
 n_iter=100000
-#  end_time=0.2 # SOD
-end_time=1.8 # Shu-Osher
-
-cfl=0.3
-
-plot_init=0
-plot_iter=100000
+if(IC_type==1):
+    end_time=0.2 # SOD
+elif(IC_type==2):
+    end_time=1.8 # Shu-Osher
+else:
+    exit("IC %d is unknown."%(IC_type))
 
 from Mesh1D import Mesh1D
 mesh=Mesh1D([x_l,x_h], p_order, n_cell, quadrature_type)
@@ -41,7 +56,6 @@ from SpaceSolver import Euler1DEq
 eq=Euler1DEq(mesh,flux_type,entropy_fix,BC_type,IC_type,doLimiting,limiter)
 
 from TimeSolver import RK1,RK2,RK3
-TimeScheme="RK3"
 
 import matplotlib.pyplot as plt
 plt.style.use('sjc')
@@ -80,7 +94,8 @@ while(time<end_time and i_iter<n_iter):
     if(time+dt>end_time):
         dt=end_time-time
     time+=dt
-    print("iteration %d, time is %.1e"%(i_iter,time))
+    if(i_iter%monitor_iter==0):
+        print("iteration %d, time is %.1e"%(i_iter,time))
     if(TimeScheme=="RK1"):
         RK1(dt,eq)
     elif(TimeScheme=="RK2"):
@@ -96,8 +111,7 @@ while(time<end_time and i_iter<n_iter):
         U_cell_mean_mat=eq.getWeightedAver_mat(eq.U_sp_mat)
         V_cell_mean_mat=U2V_mat2(U_cell_mean_mat)
         V_fp_mat=U2V_mat3(eq.U_fp_mat)
-        #  plot_cell=np.arange(50-2,50+3,dtype=int) # Debug for IC=0
-        #  plot_cell=np.arange(50-2,50+3,dtype=int) # Debug for IC=0
+        #  plot_cell=np.arange(50-2,50+3,dtype=int) # Debug for IC=1
         plot_cell=np.arange(n_cell,dtype=int)
         plot_var=0
         ax.plot(mesh.GloCoor_Mat[:,plot_cell],eq.U_sp_mat[:,plot_cell,plot_var],'x-',ms=marker_size,lw=line_width)
@@ -107,8 +121,10 @@ while(time<end_time and i_iter<n_iter):
         ax.set_xlabel("X")
         if(plot_var==0):
             ax.set_ylabel(r"$\rho$")
-            #  ax.set_ylim([-0.05,1.05]) # For SOD
-            ax.set_ylim([0.5,5.0]) # Shu-Osher
+            if(IC_type==1):
+                ax.set_ylim([-0.05,1.05]) # For SOD
+            elif(IC_type==2):
+                ax.set_ylim([0.5,5.0]) # Shu-Osher
         elif(plot_var==1):
             ax.set_ylabel(r"$\rho U$")
         elif(plot_var==2):
@@ -118,7 +134,7 @@ while(time<end_time and i_iter<n_iter):
         plt.show()
         plt.close(fig)
 
-if(time<end_time):
+if((np.isnan(time)) or (time<end_time)):
     exit("Not finished. t = %.2f"%(time))
 
 from GasDynamics import U2V_mat3,U2V_mat2
@@ -141,9 +157,10 @@ if(IC_type==1):
     #  ax.set_ylabel("U")
     ax.legend()
     ax.set_title("it=%d,t=%.3f"%(i_iter,time))
-    #  plt.show()
-    plt.savefig("sol_it%d_t%.1f.png"%(i_iter,time))
-    plt.close(fig)
+    if(limiter["type"]=="MINMODTVB"):
+        fig.savefig("P%d_NC%d_%s_CFL%.1f_%s-M%d.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["M"]))
+    elif(limiter["type"]=="SMOOTH_GOOCH"):
+        fig.savefig("P%d_NC%d_%s_CFL%.1f_%s-M%.1f-W%d.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["mid"],limiter["wid"]))
 elif(IC_type==2):
     # This data file is obtained from https://github.com/ketch/RK-WENO-Opt
     ref_fname="op_weno5_SSP_4_04_dt0.00100000.txt"
@@ -184,7 +201,12 @@ elif(IC_type==2):
     ax_Rho.set_title("it=%d,t=%.3f"%(i_iter,time))
     ax_U.set_title("it=%d,t=%.3f"%(i_iter,time))
     ax_P.set_title("it=%d,t=%.3f"%(i_iter,time))
-    fig_Rho.savefig("P%d_NC%d_%s_CFL%.1f_%s-M%d_Rho.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["M"]))
-    fig_U.savefig("P%d_NC%d_%s_CFL%.1f_%s-M%d_U.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["M"]))
-    fig_P.savefig("P%d_NC%d_%s_CFL%.1f_%s-M%d_P.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["M"]))
+    if(limiter["type"]=="MINMODTVB"):
+        fig_Rho.savefig("P%d_NC%d_%s_CFL%.1f_%s-M%.1f_Rho.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["M"]))
+        fig_U.savefig("P%d_NC%d_%s_CFL%.1f_%s-M%.1f_U.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["M"]))
+        fig_P.savefig("P%d_NC%d_%s_CFL%.1f_%s-M%.1f_P.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["M"]))
+    elif(limiter["type"]=="SMOOTH_GOOCH"):
+        fig_Rho.savefig("P%d_NC%d_%s_CFL%.1f_%s-M%.1f-W%d_Rho.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["mid"],limiter["wid"]))
+        fig_U.savefig("P%d_NC%d_%s_CFL%.1f_%s-M%.1f-W%d_U.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["mid"],limiter["wid"]))
+        fig_P.savefig("P%d_NC%d_%s_CFL%.1f_%s-M%.1f-W%d_P.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["mid"],limiter["wid"]))
 
