@@ -22,14 +22,15 @@ BC_type="EXTRAPOLATION"
 doLimiting=1
 # M=0 is MINMOD
 #  limiter={"type":"MINMODTVB","M":1000}
-limiter={"type":"SMOOTH_GOOCH","mid":-2,"wid":2}
+#  limiter={"type":"SMOOTH","mid":-2,"wid":2}
+limiter={"type":"MINMAX"}
 
 TimeScheme="RK3"
 cfl=0.3
 
 plot_init=0
-plot_iter=1000
-monitor_iter=100
+plot_iter=106
+monitor_iter=106
 ##########################################
 
 if(IC_type==1):
@@ -111,8 +112,8 @@ while(time<end_time and i_iter<n_iter):
         U_cell_mean_mat=eq.getWeightedAver_mat(eq.U_sp_mat)
         V_cell_mean_mat=U2V_mat2(U_cell_mean_mat)
         V_fp_mat=U2V_mat3(eq.U_fp_mat)
-        #  plot_cell=np.arange(50-2,50+3,dtype=int) # Debug for IC=1
-        plot_cell=np.arange(n_cell,dtype=int)
+        plot_cell=np.arange(10-1,22+3,dtype=int) # Debug for IC=1
+        #  plot_cell=np.arange(n_cell,dtype=int)
         plot_var=0
         ax.plot(mesh.GloCoor_Mat[:,plot_cell],eq.U_sp_mat[:,plot_cell,plot_var],'x-',ms=marker_size,lw=line_width)
         ax.plot(mesh.CellCenter_Vec[plot_cell],U_cell_mean_mat[plot_cell,plot_var],'o--',ms=marker_size,lw=line_width)
@@ -158,9 +159,17 @@ if(IC_type==1):
     ax.legend()
     ax.set_title("it=%d,t=%.3f"%(i_iter,time))
     if(limiter["type"]=="MINMODTVB"):
-        fig.savefig("P%d_NC%d_%s_CFL%.1f_%s-M%d.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["M"]))
-    elif(limiter["type"]=="SMOOTH_GOOCH"):
-        fig.savefig("P%d_NC%d_%s_CFL%.1f_%s-M%.1f-W%d.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["mid"],limiter["wid"]))
+        fig_fname="SOD_P%d_NC%d_%s_CFL%.1f_%s-M%d.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["M"])
+        fig.savefig(fig_fname)
+        print("%s is saved."%(fig_fname))
+    elif(limiter["type"]=="SMOOTH"):
+        fig_fname="SOD_P%d_NC%d_%s_CFL%.1f_%s-M%.1f-W%d.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["mid"],limiter["wid"])
+        fig.savefig(fig_fname)
+        print("%s is saved."%(fig_fname))
+    elif(limiter["type"]=="MINMAX"):
+        fig_fname="SOD_P%d_NC%d_%s_CFL%.1f_%s.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"])
+        fig.savefig(fig_fname)
+        print("%s is saved."%(fig_fname))
 elif(IC_type==2):
     # This data file is obtained from https://github.com/ketch/RK-WENO-Opt
     ref_fname="op_weno5_SSP_4_04_dt0.00100000.txt"
@@ -202,11 +211,15 @@ elif(IC_type==2):
     ax_U.set_title("it=%d,t=%.3f"%(i_iter,time))
     ax_P.set_title("it=%d,t=%.3f"%(i_iter,time))
     if(limiter["type"]=="MINMODTVB"):
-        fig_Rho.savefig("P%d_NC%d_%s_CFL%.1f_%s-M%.1f_Rho.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["M"]))
-        fig_U.savefig("P%d_NC%d_%s_CFL%.1f_%s-M%.1f_U.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["M"]))
-        fig_P.savefig("P%d_NC%d_%s_CFL%.1f_%s-M%.1f_P.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["M"]))
-    elif(limiter["type"]=="SMOOTH_GOOCH"):
-        fig_Rho.savefig("P%d_NC%d_%s_CFL%.1f_%s-M%.1f-W%d_Rho.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["mid"],limiter["wid"]))
-        fig_U.savefig("P%d_NC%d_%s_CFL%.1f_%s-M%.1f-W%d_U.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["mid"],limiter["wid"]))
-        fig_P.savefig("P%d_NC%d_%s_CFL%.1f_%s-M%.1f-W%d_P.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["mid"],limiter["wid"]))
+        fig_Rho.savefig("ShuOsher_P%d_NC%d_%s_CFL%.1f_%s-M%.1f_Rho.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["M"]))
+        fig_U.savefig("ShuOsher_P%d_NC%d_%s_CFL%.1f_%s-M%.1f_U.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["M"]))
+        fig_P.savefig("ShuOsher_P%d_NC%d_%s_CFL%.1f_%s-M%.1f_P.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["M"]))
+    elif(limiter["type"]=="SMOOTH"):
+        fig_Rho.savefig("ShuOsher_P%d_NC%d_%s_CFL%.1f_%s-M%.1f-W%d_Rho.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["mid"],limiter["wid"]))
+        fig_U.savefig("ShuOsher_P%d_NC%d_%s_CFL%.1f_%s-M%.1f-W%d_U.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["mid"],limiter["wid"]))
+        fig_P.savefig("ShuOsher_P%d_NC%d_%s_CFL%.1f_%s-M%.1f-W%d_P.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["mid"],limiter["wid"]))
+    elif(limiter["type"]=="MINMAX"):
+        fig_Rho.savefig("ShuOsher_P%d_NC%d_%s_CFL%.1f_%s_Rho.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"]))
+        fig_U.savefig("ShuOsher_P%d_NC%d_%s_CFL%.1f_%s_U.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"]))
+        fig_P.savefig("ShuOsher_P%d_NC%d_%s_CFL%.1f_%s_P.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"]))
 
