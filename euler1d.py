@@ -2,8 +2,8 @@ import numpy as np
 
 quadrature_type="GaussLegendre"
 
-IC_type=1 # SOD
-#  IC_type=2 # Shu-Osher
+#  IC_type=1 # SOD
+IC_type=2 # Shu-Osher
 
 if(IC_type==1):
     n_cell=100 # IC=1
@@ -22,7 +22,7 @@ BC_type="EXTRAPOLATION"
 doLimiting=1
 # M=0 is MINMOD
 #  limiter={"type":"MINMODTVB","M":1000}
-limiter={"type":"SMOOTH_GOOCH","mid":-2.6,"wid":2}
+limiter={"type":"SMOOTH_GOOCH","mid":-2,"wid":2}
 
 TimeScheme="RK3"
 cfl=0.3
