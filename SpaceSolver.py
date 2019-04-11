@@ -5,6 +5,7 @@ class Euler1DEq():
 # u_t + u * u_x = 0
 ###########################################################
     def __init__(self, in_mesh, in_flux_type, in_entropy_fix, in_BC_type, in_IC_type, in_doLimiting, in_limiter):
+        from numpy import zeros,float64
         self.mesh = in_mesh
         self.x_sp_mat = in_mesh.GloCoor_Mat
         self.p_order = in_mesh.PolyOrder
@@ -15,6 +16,7 @@ class Euler1DEq():
         self.IC_type = in_IC_type
         self.doLimiting = in_doLimiting
         self.limiter = in_limiter
+        self.trouble_cells_arr = zeros((self.x_sp_mat.shape[1],),dtype=float64)
         self.allocDOF()
         self.setIC()
         self.updateAfterRes()
@@ -110,10 +112,11 @@ class Euler1DEq():
 
     def limitSol(self):
         # Collect the max and min of the mean in the neighbouring cells
-        from numpy import zeros,tile,reshape,sum,where,abs,append,unique,array
         U_cell_mean_mat=self.getWeightedAver_mat(self.U_sp_mat)
         if(self.limiter["type"]=="SMOOTH"):
+            from numpy import tile
             smth_idc_arr = self.getSmoothnessIndicator()
+            self.trouble_cells_arr = smth_idc_arr
             phi_mat = self.getSmoothLimiter(smth_idc_arr)
             # FP
             U_cell_mean_mat2 = tile(U_cell_mean_mat,(2,1,1))
@@ -123,7 +126,42 @@ class Euler1DEq():
             U_cell_mean_mat_sp = tile(U_cell_mean_mat,(self.p_order+1,1,1))
             phi_mat_sp = tile(phi_mat,(self.p_order+1,1,1))
             self.U_sp_mat = U_cell_mean_mat_sp + phi_mat_sp*(self.U_sp_mat - U_cell_mean_mat_sp)
+        elif(self.limiter["type"]=="SMOOTH_GOOCH"):
+            from numpy import zeros,maximum,minimum,logical_and,logical_not,ones,tile
+            # Use the smoothness indicator as the shock sensor
+            smth_idc_arr = self.getSmoothnessIndicator()
+            self.trouble_cells_arr = smth_idc_arr
+            # Use the ? as the shock stablization
+            U_cell_mean_max_mat = zeros(U_cell_mean_mat.shape)
+            U_cell_mean_max_mat[1:-1,:] = maximum(U_cell_mean_mat[:-2,:], U_cell_mean_mat[2:,:])
+            U_cell_mean_max_mat[1:-1,:] = maximum(U_cell_mean_max_mat[1:-1,:], U_cell_mean_mat[1:-1,:])
+            U_cell_mean_max_mat[0,:] = maximum(U_cell_mean_mat[-1,:], U_cell_mean_mat[1,:])
+            U_cell_mean_max_mat[0,:] = maximum(U_cell_mean_max_mat[0,:], U_cell_mean_mat[0,:])
+            U_cell_mean_max_mat[-1,:] = maximum(U_cell_mean_mat[-2,:], U_cell_mean_mat[0,:])
+            U_cell_mean_max_mat[-1,:] = maximum(U_cell_mean_max_mat[-1,:], U_cell_mean_mat[-1,:])
+            U_cell_mean_min_mat = zeros(U_cell_mean_mat.shape)
+            U_cell_mean_min_mat[1:-1,:] = minimum(U_cell_mean_mat[:-2,:], U_cell_mean_mat[2:,:])
+            U_cell_mean_min_mat[1:-1,:] = minimum(U_cell_mean_min_mat[1:-1,:], U_cell_mean_mat[1:-1,:])
+            U_cell_mean_min_mat[0,:] = minimum(U_cell_mean_mat[-1,:], U_cell_mean_mat[1,:])
+            U_cell_mean_min_mat[0,:] = minimum(U_cell_mean_min_mat[0,:], U_cell_mean_mat[0,:])
+            U_cell_mean_min_mat[-1,:] = minimum(U_cell_mean_mat[-2,:], U_cell_mean_mat[0,:])
+            U_cell_mean_min_mat[-1,:] = minimum(U_cell_mean_min_mat[-1,:], U_cell_mean_mat[-1,:])
+            phi_mat = self.getSmoothMINMODTVBLimiter(smth_idc_arr,U_cell_mean_max_mat,U_cell_mean_min_mat,U_cell_mean_mat)
+            #  eps_zero=1E-12
+            #  idx_arr = logical_not(logical_and(1.0-phi_mat[:,0]>eps_zero, 1.0-phi_mat[:,2]>eps_zero))
+            #  self.trouble_cells_arr = ones((self.trouble_cells_arr.size,1))
+            #  self.trouble_cells_arr[idx_arr] = 0.0
+            # Do limiting. Directly setting U_sp and U_fp to be constant fails.
+            phi_mat2 = tile(phi_mat,(2,1,1))
+            phi_mat_sp = tile(phi_mat,(self.p_order+1,1,1))
+            # FP
+            U_cell_mean_mat2 = tile(U_cell_mean_mat,(2,1,1))
+            self.U_fp_mat = U_cell_mean_mat2 + phi_mat2*(self.U_fp_mat - U_cell_mean_mat2)
+            # SP
+            U_cell_mean_mat_sp = tile(U_cell_mean_mat,(self.p_order+1,1,1))
+            self.U_sp_mat = U_cell_mean_mat_sp + phi_mat_sp*(self.U_sp_mat - U_cell_mean_mat_sp)
         elif(self.limiter["type"]=="MINMODTVB"):
+            from numpy import zeros,reshape,where,abs,unique,append
             U_cell_mean_diff_r_mat=zeros(U_cell_mean_mat.shape)
             U_cell_mean_diff_l_mat=zeros(U_cell_mean_mat.shape)
             U_cell_mean_diff_r_mat[:-1,:]=U_cell_mean_mat[1:,:]-U_cell_mean_mat[:-1,:]
@@ -158,6 +196,8 @@ class Euler1DEq():
             idx_r=where(abs(U_diff_averfp_r_mat[:,0]-U_diff_averfp_r_new_mat[:,0])>U_diff_averfp_eps)[0]
             idx_l=where(abs(U_diff_averfp_l_mat[:,0]-U_diff_averfp_l_new_mat[:,0])>U_diff_averfp_eps)[0]
             idx_arr=unique(append(idx_l,idx_r))
+            self.trouble_cells_arr = zeros((self.trouble_cells_arr.size,1))
+            self.trouble_cells_arr[idx_arr] = 1.0
             # Do limiting
             # On FP
             self.U_fp_mat[0,idx_r,:]=U_cell_mean_mat[idx_r,:]-U_diff_averfp_r_new_mat[idx_r,:]
@@ -169,7 +209,7 @@ class Euler1DEq():
                     #  self.U_sp_mat[isp,ic,:]=(self.x_sp_mat[isp,ic]-self.mesh.FluxPts_Mat[0,ic]) * (self.U_fp_mat[0,ic,:]-self.U_fp_mat[1,ic,:]) / (self.x_sp_mat[0,ic]-self.x_sp_mat[-1,ic]) + self.U_fp_mat[0,ic,:] # Biased P1 MINMOD will blow up.
                     #  self.U_sp_mat[isp,ic,:]=(self.x_sp_mat[isp,ic]-self.mesh.CellCenter_Vec[ic]) * (self.U_fp_mat[0,ic,:]-self.U_fp_mat[1,ic,:]) / (self.x_sp_mat[0,ic]-self.x_sp_mat[-1,ic]) + U_cell_mean_mat[ic,:] # Centered P1 MINMOD will oscillate
         elif(self.limiter["type"]=="MINMAX"):
-            from numpy import maximum,minimum,logical_and,logical_not
+            from numpy import zeros,maximum,minimum,logical_and,logical_not,tile,ones
             U_cell_mean_max_mat = zeros(U_cell_mean_mat.shape)
             U_cell_mean_max_mat[1:-1,:] = maximum(U_cell_mean_mat[:-2,:], U_cell_mean_mat[2:,:])
             U_cell_mean_max_mat[1:-1,:] = maximum(U_cell_mean_max_mat[1:-1,:], U_cell_mean_mat[1:-1,:])
@@ -188,7 +228,9 @@ class Euler1DEq():
             # Mark trouble cells only when both density and energy are marked.
             eps_zero=1E-12
             idx_arr = logical_not(logical_and(1.0-phi_mat[:,0]>eps_zero, 1.0-phi_mat[:,2]>eps_zero))
-            phi_mat[idx_arr,:] = 1.0
+            #  phi_mat[idx_arr,:] = 1.0
+            self.trouble_cells_arr = ones((self.trouble_cells_arr.size,1))
+            self.trouble_cells_arr[idx_arr] = 0.0
             # Strong form blows up for SOD
             #  phi_mat2 = tile(reshape(phi_mat[:,0],(phi_mat[:,0].size,1)),(2,1,3))
             #  phi_mat_sp = tile(reshape(phi_mat[:,0],(phi_mat[:,0].size,1)),(self.p_order+1,1,3))
@@ -260,6 +302,42 @@ class Euler1DEq():
         rho_int_arr = sum(weights_mat * rho_mat, axis=0)
         smth_idc_arr = log10(rho_diff2_int_arr / rho_int_arr)
         return smth_idc_arr
+
+    def getSmoothMINMODTVBLimiter(self,in_smth_idc_arr,in_U_cell_mean_max_mat,in_U_cell_mean_min_mat,in_U_cell_mean_mat):
+        from numpy import logical_and,tile,zeros,ones,amin,sin,pi,reshape
+        U_cell_mean_max_mat2 = tile(in_U_cell_mean_max_mat, (2,1,1))
+        U_cell_mean_min_mat2 = tile(in_U_cell_mean_min_mat, (2,1,1))
+        eps_zero = 1E-12
+        U_cell_mean_mat2 = tile(in_U_cell_mean_mat, (2,1,1))
+        U_cell_mean_diff_fp_mat = self.U_fp_mat - U_cell_mean_mat2
+        idx_pos_mat = U_cell_mean_diff_fp_mat > eps_zero
+        idx_neg_mat = U_cell_mean_diff_fp_mat < -eps_zero
+        U_cell_mean_diff_max_mat2 = U_cell_mean_max_mat2 - U_cell_mean_mat2
+        U_cell_mean_diff_min_mat2 = U_cell_mean_min_mat2 - U_cell_mean_mat2
+        U_cell_mean_diff_max_ratio_mat2 = ones(U_cell_mean_diff_max_mat2.shape) * 10
+        U_cell_mean_diff_min_ratio_mat2 = ones(U_cell_mean_diff_min_mat2.shape) * 10
+        U_cell_mean_diff_max_ratio_mat2[idx_pos_mat] = U_cell_mean_diff_max_mat2[idx_pos_mat] / U_cell_mean_diff_fp_mat[idx_pos_mat]
+        U_cell_mean_diff_min_ratio_mat2[idx_neg_mat] = U_cell_mean_diff_min_mat2[idx_neg_mat] / U_cell_mean_diff_fp_mat[idx_neg_mat]
+        yt=1.5
+        idx_pos2_mat = U_cell_mean_diff_max_ratio_mat2 < yt
+        idx_neg2_mat = U_cell_mean_diff_min_ratio_mat2 < yt
+        idx_pos_mat = logical_and(idx_pos_mat, idx_pos2_mat)
+        idx_neg_mat = logical_and(idx_neg_mat, idx_neg2_mat)
+        phi_mat2 = ones(self.U_fp_mat.shape)
+        phi_mat2[idx_pos_mat] = -4.0/27.0*U_cell_mean_diff_max_ratio_mat2[idx_pos_mat]**3+U_cell_mean_diff_max_ratio_mat2[idx_pos_mat]
+        phi_mat2[idx_neg_mat] = -4.0/27.0*U_cell_mean_diff_min_ratio_mat2[idx_neg_mat]**3+U_cell_mean_diff_min_ratio_mat2[idx_neg_mat]
+        phi_mat = amin(phi_mat2, axis=0)
+        # sigma
+        sigma_arr = ones(in_smth_idc_arr.shape)
+        idx_arr = logical_and(in_smth_idc_arr >= self.limiter["mid"]-self.limiter["wid"], in_smth_idc_arr <= self.limiter["mid"]+self.limiter["wid"])
+        sigma_mag = 0.5
+        sigma_freq = 0.5*pi # scale=4 fails. scale=1 should be correct.
+        sigma_arr[idx_arr] = sigma_mag*(1-sin(sigma_freq*(in_smth_idc_arr[idx_arr]-self.limiter["mid"])/self.limiter["wid"]))
+        idx_arr = in_smth_idc_arr > self.limiter["mid"]+self.limiter["wid"]
+        sigma_arr[idx_arr] = 0.0
+        sigma_arr3 = tile(reshape(sigma_arr,(sigma_arr.size,1)),(1,3))
+        phi_mat = sigma_arr3 + (1.0 - sigma_arr3)*phi_mat
+        return phi_mat
 
     def getMinMaxLimiter(self,in_U_cell_mean_max_mat,in_U_cell_mean_min_mat,\
             in_U_cell_mean_mat):

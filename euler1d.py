@@ -7,8 +7,11 @@ IC_type=2 # Shu-Osher
 
 if(IC_type==1):
     n_cell=100 # IC=1
+    #  n_cell=400 # IC=1
 elif(IC_type==2):
-    n_cell=180 # IC=2
+    #  n_cell=180 # IC=2
+    n_cell=360 # IC=2
+    #  n_cell=720 # IC=2
 
 p_order=3
 
@@ -21,16 +24,17 @@ BC_type="EXTRAPOLATION"
 
 doLimiting=1
 # M=0 is MINMOD
-#  limiter={"type":"MINMODTVB","M":1000}
-#  limiter={"type":"SMOOTH","mid":-2,"wid":2}
+#  limiter={"type":"MINMODTVB","M":2000}
+#  limiter={"type":"SMOOTH","mid":-4.5,"wid":1.5}
+#  limiter={"type":"SMOOTH_GOOCH","mid":-5.5,"wid":1.5} # -3,2 blows up.
 limiter={"type":"MINMAX"}
 
 TimeScheme="RK3"
-cfl=0.3
+cfl=0.1
 
 plot_init=0
-plot_iter=106
-monitor_iter=106
+plot_iter=100000
+monitor_iter=100
 ##########################################
 
 if(IC_type==1):
@@ -62,8 +66,8 @@ import matplotlib.pyplot as plt
 plt.style.use('sjc')
 
 plot_x_arr=np.reshape(mesh.GloCoor_Mat.T,(mesh.GloCoor_Mat.size,))
-marker_size=8
-line_width=4
+marker_size=2
+line_width=2
 
 if plot_init==1:
     fig=plt.figure()
@@ -78,6 +82,9 @@ if plot_init==1:
     ax.legend()
     plt.show()
     plt.close(fig)
+
+trouble_cells_mat = np.zeros((1,n_cell+2))
+trouble_cells_mat[0,2:] = mesh.CellCenter_Vec
 
 i_iter=0
 time=0
@@ -105,6 +112,10 @@ while(time<end_time and i_iter<n_iter):
         RK3(dt,eq)
     else:
         exit("Not implemented!")
+    # Output the trouble cells
+    trouble_cells_arr = np.append(np.array([i_iter, time]), eq.trouble_cells_arr)
+    trouble_cells_arr = np.reshape(trouble_cells_arr, (1,trouble_cells_arr.size))
+    trouble_cells_mat = np.append(trouble_cells_mat, trouble_cells_arr, axis=0)
     if(i_iter%plot_iter==0):
         fig=plt.figure()
         ax=fig.gca()
@@ -112,9 +123,10 @@ while(time<end_time and i_iter<n_iter):
         U_cell_mean_mat=eq.getWeightedAver_mat(eq.U_sp_mat)
         V_cell_mean_mat=U2V_mat2(U_cell_mean_mat)
         V_fp_mat=U2V_mat3(eq.U_fp_mat)
-        plot_cell=np.arange(10-1,22+3,dtype=int) # Debug for IC=1
+        #  plot_cell=np.arange(10-1,22+3,dtype=int) # Debug for IC=1
+        plot_cell=np.where(np.logical_and(mesh.CellCenter_Vec>=-4.0,mesh.CellCenter_Vec<=-3.5))[0] # Debug for IC=2
         #  plot_cell=np.arange(n_cell,dtype=int)
-        plot_var=0
+        plot_var=1
         ax.plot(mesh.GloCoor_Mat[:,plot_cell],eq.U_sp_mat[:,plot_cell,plot_var],'x-',ms=marker_size,lw=line_width)
         ax.plot(mesh.CellCenter_Vec[plot_cell],U_cell_mean_mat[plot_cell,plot_var],'o--',ms=marker_size,lw=line_width)
         ax.plot(mesh.FluxPts_Mat[0,plot_cell],eq.U_fp_mat[0,plot_cell,plot_var],'>',ms=marker_size,lw=line_width)
@@ -137,6 +149,26 @@ while(time<end_time and i_iter<n_iter):
 
 if((np.isnan(time)) or (time<end_time)):
     exit("Not finished. t = %.2f"%(time))
+
+def plot_trouble_cells(in_trouble_cells_mat, in_fig_fname):
+    fig=plt.figure()
+    ax=fig.gca()
+    # Filter the marked cells
+    if(limiter["type"]=="SMOOTH" or limiter["type"]=="SMOOTH_GOOCH"):
+        #  idx_mat = np.logical_and(in_trouble_cells_mat >= (limiter["mid"]-limiter["wid"]), in_trouble_cells_mat <= (limiter["mid"]+limiter["wid"]) )
+        idx_mat = in_trouble_cells_mat >= (limiter["mid"]-limiter["wid"])
+    elif(limiter["type"]=="MINMODTVB" or limiter["type"]=="MINMAX"):
+        idx_mat = in_trouble_cells_mat > 0.5
+    idx_mat = idx_mat[1:,2:]
+    time_mat = in_trouble_cells_mat[1:,1]
+    time_mat = np.tile(np.reshape(time_mat,(time_mat.size,1)), (1,idx_mat.shape[1]))
+    x_mat = in_trouble_cells_mat[0,2:]
+    x_mat = np.tile(np.reshape(x_mat, (1,x_mat.size)), (idx_mat.shape[0],1))
+    ax.plot(x_mat[idx_mat], time_mat[idx_mat], 'o', ms=marker_size,lw=line_width)
+    ax.set_xlabel("X")
+    ax.set_ylabel("T")
+    fig.savefig(in_fig_fname)
+    print("%s is saved."%(in_fig_fname))
 
 from GasDynamics import U2V_mat3,U2V_mat2
 V_sp_mat=U2V_mat3(eq.U_sp_mat)
@@ -162,14 +194,38 @@ if(IC_type==1):
         fig_fname="SOD_P%d_NC%d_%s_CFL%.1f_%s-M%d.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["M"])
         fig.savefig(fig_fname)
         print("%s is saved."%(fig_fname))
+        data_fname="trouble_cells_history_SOD_P%d_NC%d_%s_CFL%.1f_%s-M%d.dat"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["M"])
+        np.savetxt(data_fname, trouble_cells_mat)
+        print("%s is saved."%(data_fname))
+        fig_fname="trouble_cells_history_SOD_P%d_NC%d_%s_CFL%.1f_%s-M%d.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["M"])
+        plot_trouble_cells(trouble_cells_mat,fig_fname)
     elif(limiter["type"]=="SMOOTH"):
         fig_fname="SOD_P%d_NC%d_%s_CFL%.1f_%s-M%.1f-W%d.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["mid"],limiter["wid"])
         fig.savefig(fig_fname)
         print("%s is saved."%(fig_fname))
+        data_fname="trouble_cells_history_SOD_P%d_NC%d_%s_CFL%.1f_%s-M%.1f-W%d.dat"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["mid"],limiter["wid"])
+        np.savetxt(data_fname, trouble_cells_mat)
+        print("%s is saved."%(data_fname))
+        fig_fname="trouble_cells_history_SOD_P%d_NC%d_%s_CFL%.1f_%s-M%.1f-W%d.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["mid"],limiter["wid"])
+        plot_trouble_cells(trouble_cells_mat,fig_fname)
+    elif(limiter["type"]=="SMOOTH_GOOCH"):
+        fig_fname="SOD_P%d_NC%d_%s_CFL%.1f_%s-M%.1f-W%d.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["mid"],limiter["wid"])
+        fig.savefig(fig_fname)
+        print("%s is saved."%(fig_fname))
+        data_fname="trouble_cells_history_SOD_P%d_NC%d_%s_CFL%.1f_%s-M%.1f-W%d.dat"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["mid"],limiter["wid"])
+        np.savetxt(data_fname, trouble_cells_mat)
+        print("%s is saved."%(data_fname))
+        fig_fname="trouble_cells_history_SOD_P%d_NC%d_%s_CFL%.1f_%s-M%.1f-W%d.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["mid"],limiter["wid"])
+        plot_trouble_cells(trouble_cells_mat,fig_fname)
     elif(limiter["type"]=="MINMAX"):
         fig_fname="SOD_P%d_NC%d_%s_CFL%.1f_%s.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"])
         fig.savefig(fig_fname)
         print("%s is saved."%(fig_fname))
+        data_fname="trouble_cells_history_SOD_P%d_NC%d_%s_CFL%.1f_%s.dat"%(p_order,n_cell,TimeScheme,cfl,limiter["type"])
+        np.savetxt(data_fname, trouble_cells_mat)
+        print("%s is saved."%(data_fname))
+        fig_fname="trouble_cells_history_SOD_P%d_NC%d_%s_CFL%.1f_%s.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"])
+        plot_trouble_cells(trouble_cells_mat,fig_fname)
 elif(IC_type==2):
     # This data file is obtained from https://github.com/ketch/RK-WENO-Opt
     ref_fname="op_weno5_SSP_4_04_dt0.00100000.txt"
@@ -193,6 +249,10 @@ elif(IC_type==2):
     ax_U.plot(ref_X_arr,ref_V_mat[:,1],'-',lw=line_width,label="WENO5-RK4")
     ax_P.plot(ref_X_arr,ref_V_mat[:,2],'-',lw=line_width,label="WENO5-RK4")
     ax_Rho.plot(plot_x_arr,np.reshape(V_sp_mat[:,:,0].T,(V_sp_mat[:,:,0].size,)),'o',ms=marker_size,lw=line_width,label="FR-P%d-%s"%(p_order,TimeScheme))
+    #  out_data=np.zeros((plot_x_arr.size,2))
+    #  out_data[:,0]=plot_x_arr
+    #  out_data[:,1]=np.reshape(V_sp_mat[:,:,0].T,(V_sp_mat[:,:,0].size,))
+    #  np.savetxt("rho.dat",out_data,delimiter=',')
     ax_U.plot(plot_x_arr,np.reshape(V_sp_mat[:,:,1].T,(V_sp_mat[:,:,0].size,)),'s',ms=marker_size,lw=line_width,label="FR-P%d-%s"%(p_order,TimeScheme))
     ax_P.plot(plot_x_arr,np.reshape(V_sp_mat[:,:,2].T,(V_sp_mat[:,:,0].size,)),'v',ms=marker_size,lw=line_width,label="FR-P%d-%s"%(p_order,TimeScheme))
     ax_Rho.set_ylim([0,4.5])
@@ -214,12 +274,27 @@ elif(IC_type==2):
         fig_Rho.savefig("ShuOsher_P%d_NC%d_%s_CFL%.1f_%s-M%.1f_Rho.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["M"]))
         fig_U.savefig("ShuOsher_P%d_NC%d_%s_CFL%.1f_%s-M%.1f_U.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["M"]))
         fig_P.savefig("ShuOsher_P%d_NC%d_%s_CFL%.1f_%s-M%.1f_P.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["M"]))
-    elif(limiter["type"]=="SMOOTH"):
-        fig_Rho.savefig("ShuOsher_P%d_NC%d_%s_CFL%.1f_%s-M%.1f-W%d_Rho.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["mid"],limiter["wid"]))
-        fig_U.savefig("ShuOsher_P%d_NC%d_%s_CFL%.1f_%s-M%.1f-W%d_U.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["mid"],limiter["wid"]))
-        fig_P.savefig("ShuOsher_P%d_NC%d_%s_CFL%.1f_%s-M%.1f-W%d_P.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["mid"],limiter["wid"]))
+        data_fname="trouble_cells_history_ShuOsher_P%d_NC%d_%s_CFL%.1f_%s-M%d.dat"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["M"])
+        np.savetxt(data_fname, trouble_cells_mat)
+        print("%s is saved."%(data_fname))
+        fig_fname="trouble_cells_history_ShuOsher_P%d_NC%d_%s_CFL%.1f_%s-M%d.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["M"])
+        plot_trouble_cells(trouble_cells_mat,fig_fname)
+    elif(limiter["type"]=="SMOOTH" or limiter["type"]=="SMOOTH_GOOCH"):
+        fig_Rho.savefig("ShuOsher_P%d_NC%d_%s_CFL%.1f_%s-M%.1f-W%.1f_Rho.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["mid"],limiter["wid"]))
+        fig_U.savefig("ShuOsher_P%d_NC%d_%s_CFL%.1f_%s-M%.1f-W%.1f_U.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["mid"],limiter["wid"]))
+        fig_P.savefig("ShuOsher_P%d_NC%d_%s_CFL%.1f_%s-M%.1f-W%.1f_P.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["mid"],limiter["wid"]))
+        data_fname="trouble_cells_history_ShuOsher_P%d_NC%d_%s_CFL%.1f_%s-M%.1f-W%.1f.dat"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["mid"],limiter["wid"])
+        np.savetxt(data_fname, trouble_cells_mat)
+        print("%s is saved."%(data_fname))
+        fig_fname="trouble_cells_history_ShuOsher_P%d_NC%d_%s_CFL%.1f_%s-M%.1f-W%.1f.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"],limiter["mid"],limiter["wid"])
+        plot_trouble_cells(trouble_cells_mat,fig_fname)
     elif(limiter["type"]=="MINMAX"):
         fig_Rho.savefig("ShuOsher_P%d_NC%d_%s_CFL%.1f_%s_Rho.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"]))
         fig_U.savefig("ShuOsher_P%d_NC%d_%s_CFL%.1f_%s_U.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"]))
         fig_P.savefig("ShuOsher_P%d_NC%d_%s_CFL%.1f_%s_P.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"]))
+        data_fname="trouble_cells_history_ShuOsher_P%d_NC%d_%s_CFL%.1f_%s.dat"%(p_order,n_cell,TimeScheme,cfl,limiter["type"])
+        np.savetxt(data_fname, trouble_cells_mat)
+        print("%s is saved."%(data_fname))
+        fig_fname="trouble_cells_history_ShuOsher_P%d_NC%d_%s_CFL%.1f_%s.png"%(p_order,n_cell,TimeScheme,cfl,limiter["type"])
+        plot_trouble_cells(trouble_cells_mat,fig_fname)
 
